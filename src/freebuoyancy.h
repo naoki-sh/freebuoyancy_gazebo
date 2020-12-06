@@ -3,8 +3,9 @@
 #include <gazebo/common/Plugin.hh>
 #include <ignition/math.hh>
 
-
-
+#include "wave_gazebo_plugins/Wavefield.hh"
+#include "wave_gazebo_plugins/WavefieldEntity.hh"
+#include "wave_gazebo_plugins/WavefieldModelPlugin.hh"
 
 namespace gazebo {
 
@@ -44,6 +45,7 @@ private:
     std::string description_;
 
     physics::WorldPtr world_;
+    physics::ModelPtr model_;
     event::ConnectionPtr update_event_;
 
     // links that are subject to fluid effects
@@ -53,6 +55,8 @@ private:
 
     ignition::math::Vector3d fluid_velocity_;
 
+    std::string waveModelName_;
+    std::shared_ptr<const asv::WaveParameters> waveParams_;
 };
 
 GZ_REGISTER_MODEL_PLUGIN(FreeBuoyancyPlugin)

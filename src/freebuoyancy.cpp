@@ -1,3 +1,4 @@
+#include "ros/ros.h"
 #include <gazebo/common/Plugin.hh>
 #include <gazebo/gazebo.hh>
 
@@ -15,6 +16,7 @@
 using std::cout;
 using std::endl;
 using std::string;
+using namespace asv;
 
 namespace gazebo {
 
@@ -30,6 +32,7 @@ void FreeBuoyancyPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     cout << ("Loading freebuoyancy_gazebo plugin...\n");
 
     this->world_ = _model->GetWorld();
+    model_ = _model;
 
     // parse plugin options
     description_ = "robot_description";
@@ -38,6 +41,13 @@ void FreeBuoyancyPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     std::string fluid_topic = "current";
 
     if (_sdf->HasElement("descriptionParam"))  description_ = _sdf->Get<std::string>("descriptionParam");
+
+    // Capture the wave model
+    if (_sdf->HasElement("wave_model"))
+    {
+      waveModelName_ = _sdf->Get<std::string>("wave_model");
+    }
+    waveParams_ = nullptr;
 
     if (_sdf->HasElement("surface")) {
         has_surface_ = true;
@@ -53,6 +63,7 @@ void FreeBuoyancyPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     if (_sdf->HasElement("fluidTopic"))  fluid_topic = _sdf->Get<std::string>("fluidTopic");
 
     fluid_velocity_.Set(0, 0, 0);
+
 
     // Register plugin update
     update_event_ = event::Events::ConnectWorldUpdateBegin(boost::bind(&FreeBuoyancyPlugin::OnUpdate, this));
@@ -70,16 +81,35 @@ void FreeBuoyancyPlugin::OnUpdate() {
     unsigned int i;
     std::vector<model_st>::iterator model_it;
     bool found;
+  
+    #if GAZEBO_MAJOR_VERSION >= 8
+      double simTime = world_->SimTime().Double();
+    #else
+      double simTime = world_->GetSimTime().Double();
+    #endif
 
-    for (i=0; i<world_->ModelCount(); ++i) {
+    if (!waveModelName_.empty())
+    {
+      // If we haven't yet, retrieve the wave parameters from ocean model plugin.
+      if (!waveParams_)
+      {
+        waveParams_ = WavefieldModelPlugin::GetWaveParams(world_, waveModelName_);
+      }
+    }
+
+    for (i=0; i<world_->ModelCount(); ++i)
+    {
         found = false;
-        for (model_it = parsed_models_.begin(); model_it!=parsed_models_.end(); ++model_it) {
-            if (world_->ModelByIndex(i)->GetName() == model_it->name)
+        std::string model_name = world_->ModelByIndex(i)->GetName();
+        for (model_it = parsed_models_.begin(); model_it!=parsed_models_.end(); ++model_it) 
+        {
+            if (model_name == model_it->name)
                 found = true;
         }
-        if (!found && !(world_->ModelByIndex(i)->IsStatic())) // model not in listand not static, parse it for potential buoyancy flags
+        if (!found && !(world_->ModelByIndex(i)->IsStatic()) && model_name == model_->GetName()) // model not in listand not static, parse it for potential buoyancy flags
             ParseNewModel(world_->ModelByIndex(i));
     }
+
 
     // look for deleted world models
     model_it = parsed_models_.begin();
@@ -109,6 +139,7 @@ void FreeBuoyancyPlugin::OnUpdate() {
                                          - surface_plane_.X() * cob_position.X()
                                          - surface_plane_.Y() * cob_position.Y()
                                          - surface_plane_.Z() * cob_position.Z();
+            signed_distance_to_surface += WavefieldSampler::ComputeDepthSimply(*waveParams_, cob_position, simTime);
             if (signed_distance_to_surface > -link_it->limit) {
                 if (signed_distance_to_surface > link_it->limit) {
                     actual_force *= 0;
